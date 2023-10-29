@@ -1,8 +1,7 @@
 import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.*;
-import java.io.File;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import java.util.LinkedList;
 
 class Book {
@@ -11,71 +10,67 @@ class Book {
     String synopsis;
     int numOfPages;
     String genre;
-    ImageIcon coverImage;
 
-    Book(String title, String author, String synopsis, int numOfPages, String genre, ImageIcon coverImage) {
+    Book(String title, String author, String synopsis, int numOfPages, String genre) {
         this.title = title;
         this.author = author;
         this.synopsis = synopsis;
         this.numOfPages = numOfPages;
         this.genre = genre;
-        this.coverImage = coverImage;
     }
 }
 
 public class AdminPanel extends JFrame {
-    private LinkedList<Book> bookList = new LinkedList<>();
-    private JTextField titleField, authorField, numOfPagesField;
+    private LinkedList<Book> books = new LinkedList<>();
+    private JTextField titleField, authorField, pagesField;
     private JTextArea synopsisField;
-    private JButton addImageButton, submitButton, editButton, deleteButton, clearButton, backButton;
+    private JButton submitButton, editButton, deleteButton, clearButton, backButton;
     private JTextArea bookDisplay;
-    private JPanel bookDetailsPanel;
     private JComboBox<String> genreComboBox;
+
+    private JTable bookTable;
+    private DefaultTableModel tableModel;
+
+    private int selectedRowIndex = -1; // Keep track of the selected row index for editing
 
     public AdminPanel() {
         setTitle("AdminPanel");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setLayout(new BorderLayout());
 
+        // Create a JSplitPane to divide the frame into two sections
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
+        splitPane.setDividerLocation(400); // Set the initial divider location
+
         JPanel inputPanel = new JPanel();
-        inputPanel.setLayout(new GridLayout(8, 2));
-        inputPanel.add(new JLabel("Title: "));
-        titleField = new JTextField(20);
-        inputPanel.add(titleField);
-        inputPanel.add(new JLabel("Author: "));
-        authorField = new JTextField(20);
-        inputPanel.add(authorField);
+        inputPanel.setLayout(new GridLayout(0, 2));
 
-        numOfPagesField = new JTextField(6); // Maximum of 6 characters
-        inputPanel.add(new JLabel("Number of Pages: "));
-        inputPanel.add(numOfPagesField);
+        addFormField(inputPanel, "Title:", titleField = new JTextField(20));
+        addFormField(inputPanel, "Author:", authorField = new JTextField(20));
 
-        inputPanel.add(new JLabel("Genre: "));
-        String[] genres = {"Mystery", "Science Fiction", "Fantasy", "Historical Fiction", "Romance", "Non-Fiction"};
-        genreComboBox = new JComboBox<>(genres);
-        inputPanel.add(genreComboBox);
-        inputPanel.add(new JLabel("Synopsis: "));
-        synopsisField = new JTextArea(4, 20);
-        inputPanel.add(new JScrollPane(synopsisField));
-
-        addImageButton = new JButton("Add Image");
-        inputPanel.add(addImageButton);
-
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setFileFilter(new FileNameExtensionFilter("Image files", "jpg", "jpeg", "png", "gif"));
-
-        addImageButton.addActionListener(new ActionListener() {
+        // Number of Pages field with character limit
+        pagesField = new JTextField(6);
+        pagesField.addKeyListener(new KeyAdapter() {
             @Override
-            public void actionPerformed(ActionEvent e) {
-                int returnValue = fileChooser.showOpenDialog(null);
-                if (returnValue == JFileChooser.APPROVE_OPTION) {
-                    File selectedFile = fileChooser.getSelectedFile();
-                    ImageIcon image = new ImageIcon(selectedFile.getAbsolutePath());
-                    displayBookDetails(titleField.getText(), authorField.getText(), synopsisField.getText(), numOfPagesField.getText(), (String) genreComboBox.getSelectedItem(), image);
-                    submitButton.setEnabled(true);
+            public void keyTyped(KeyEvent e) {
+                char c = e.getKeyChar();
+                if (!Character.isDigit(c) || pagesField.getText().length() >= 6) {
+                    e.consume();
                 }
             }
         });
+        addFormField(inputPanel, "Number of Pages:", pagesField);
+
+        addFormField(inputPanel, "Genre:", genreComboBox = new JComboBox<>(new String[]{"Mystery", "Science Fiction", "Fantasy", "Historical Fiction", "Romance", "Non-Fiction"}));
+        addFormField(inputPanel, "Synopsis:", new JScrollPane(synopsisField = new JTextArea(4, 20)));
+
+        splitPane.setLeftComponent(inputPanel);
+
+        // Initialize the book table
+        initBookTable();
+        splitPane.setRightComponent(new JScrollPane(bookTable));
+
+        add(splitPane, BorderLayout.CENTER);
 
         submitButton = new JButton("Submit");
         editButton = new JButton("Edit");
@@ -83,7 +78,7 @@ public class AdminPanel extends JFrame {
         clearButton = new JButton("Clear");
         backButton = new JButton("Exit");
 
-        submitButton.setEnabled(false);
+        submitButton.setEnabled(true);
         editButton.setEnabled(false);
         deleteButton.setEnabled(false);
         clearButton.setEnabled(true);
@@ -93,11 +88,11 @@ public class AdminPanel extends JFrame {
                 String title = titleField.getText();
                 String author = authorField.getText();
                 String synopsis = synopsisField.getText();
-                String pagesText = numOfPagesField.getText().trim();
+                String pagesText = pagesField.getText().trim();
                 int numOfPages = pagesText.isEmpty() ? 0 : Integer.parseInt(pagesText);
                 String genre = (String) genreComboBox.getSelectedItem();
-                ImageIcon coverImage = getCoverImage();
-                bookList.add(new Book(title, author, synopsis, numOfPages, genre, coverImage));
+                books.add(new Book(title, author, synopsis, numOfPages, genre));
+                tableModel.addRow(new Object[]{title, author, genre, pagesText});
                 JOptionPane.showMessageDialog(null, "Book submitted!");
                 clearFields();
             }
@@ -105,24 +100,56 @@ public class AdminPanel extends JFrame {
 
         editButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
-                // Implement the edit functionality here
+                if (selectedRowIndex != -1) {
+                    // Get the edited data from the text fields
+                    String title = titleField.getText();
+                    String author = authorField.getText();
+                    String synopsis = synopsisField.getText();
+                    String pagesText = pagesField.getText().trim();
+                    int numOfPages = pagesText.isEmpty() ? 0 : Integer.parseInt(pagesText);
+                    String genre = (String) genreComboBox.getSelectedItem();
+
+                    // Update the book in the list and the table
+                    Book book = books.get(selectedRowIndex);
+                    book.title = title;
+                    book.author = author;
+                    book.synopsis = synopsis;
+                    book.numOfPages = numOfPages;
+                    book.genre = genre;
+                    tableModel.setValueAt(title, selectedRowIndex, 0);
+                    tableModel.setValueAt(author, selectedRowIndex, 1);
+                    tableModel.setValueAt(genre, selectedRowIndex, 2);
+                    tableModel.setValueAt(pagesText, selectedRowIndex, 3);
+
+                    JOptionPane.showMessageDialog(null, "Book successfully edited!");
+                    clearFields();
+                    selectedRowIndex = -1;
+                    editButton.setEnabled(false);
+
+                    // Save data to a file here
+                    // saveDataToFile();
+                }
             }
         });
 
         deleteButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
-                // Implement the delete functionality here
+                if (selectedRowIndex != -1) {
+                    books.remove(selectedRowIndex);
+                    tableModel.removeRow(selectedRowIndex);
+                    JOptionPane.showMessageDialog(null, "Book successfully deleted!");
+                    clearFields();
+                    selectedRowIndex = -1;
+                    editButton.setEnabled(false);
+                    deleteButton.setEnabled(false);
+                }
             }
         });
 
         clearButton.addActionListener(new ActionListener() {
             public void actionPerformed(ActionEvent e) {
-                titleField.setText("");
-                authorField.setText("");
-                numOfPagesField.setText("");
-                genreComboBox.setSelectedIndex(0);
-                synopsisField.setText("");
-                submitButton.setEnabled(false);
+                clearFields();
+                selectedRowIndex = -1;
                 editButton.setEnabled(false);
                 deleteButton.setEnabled(false);
             }
@@ -140,71 +167,58 @@ public class AdminPanel extends JFrame {
         inputPanel.add(clearButton);
         inputPanel.add(backButton);
 
-        add(inputPanel, BorderLayout.NORTH);
-
         bookDisplay = new JTextArea();
         bookDisplay.setEditable(false);
-        JScrollPane scrollPane = new JScrollPane(bookDisplay);
-        add(scrollPane, BorderLayout.CENTER);
+        add(bookDisplay, BorderLayout.SOUTH);
 
-        bookDetailsPanel = new JPanel();
-        bookDetailsPanel.setLayout(new BorderLayout());
-        add(bookDetailsPanel, BorderLayout.SOUTH);
+        // Add a ListSelectionListener to the book table to track selected rows
+        bookTable.getSelectionModel().addListSelectionListener(e -> {
+            int selectedRow = bookTable.getSelectedRow();
+            if (selectedRow != -1) {
+                // Populate the text fields with the selected row's data
+                titleField.setText(tableModel.getValueAt(selectedRow, 0).toString());
+                authorField.setText(tableModel.getValueAt(selectedRow, 1).toString());
+                genreComboBox.setSelectedItem(tableModel.getValueAt(selectedRow, 2).toString());
+                pagesField.setText(tableModel.getValueAt(selectedRow, 3).toString());
+                synopsisField.setText(books.get(selectedRow).synopsis);
 
-        setSize(400, 400);
+                // Enable the edit and delete buttons
+                selectedRowIndex = selectedRow;
+                editButton.setEnabled(true);
+                deleteButton.setEnabled(true);
+            }
+        });
+
+        setSize(800, 400);
         setLocationRelativeTo(null);
         setVisible(true);
     }
 
-    private void displayBookDetails(String title, String author, String synopsis, String numOfPages, String genre, ImageIcon coverImage) {
-        bookDetailsPanel.removeAll();
-
-        JTextArea bookDetailsTextArea = new JTextArea();
-        bookDetailsTextArea.setWrapStyleWord(true);
-        bookDetailsTextArea.setLineWrap(true);
-        bookDetailsTextArea.setEditable(false);
-        bookDetailsTextArea.append("Title: " + title + "\nAuthor: " + author + "\nNum of Pages: " + numOfPages + "\nGenre: " + genre + "\nSynopsis:\n" + synopsis);
-
-        JScrollPane scrollPane = new JScrollPane(bookDetailsTextArea);
-        bookDetailsPanel.add(scrollPane, BorderLayout.CENTER);
-
-        if (coverImage != null) {
-            int maxWidth = 200;
-            int maxHeight = 300;
-            int imgWidth = coverImage.getIconWidth();
-            int imgHeight = coverImage.getIconHeight();
-            if (imgWidth > maxWidth || imgHeight > maxHeight) {
-                if (imgWidth * maxHeight > maxWidth * imgHeight) {
-                    imgWidth = maxWidth;
-                    imgHeight = maxHeight * imgHeight / imgWidth;
-                } else {
-                    imgHeight = maxHeight;
-                    imgWidth = maxWidth * imgWidth / imgHeight;
-                }
+    private void initBookTable() {
+        String[] columnNames = {"Title", "Author", "Genre", "Number of Pages"};
+        tableModel = new DefaultTableModel(columnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false; // Make the table uneditable
             }
-            ImageIcon scaledImage = new ImageIcon(coverImage.getImage().getScaledInstance(imgWidth, imgHeight, Image.SCALE_SMOOTH));
-            JLabel coverImageLabel = new JLabel(scaledImage);
-            bookDetailsPanel.add(coverImageLabel, BorderLayout.NORTH);
-        }
-
-        bookDetailsPanel.revalidate();
+        };
+        bookTable = new JTable(tableModel);
+        bookTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        bookTable.setAutoCreateRowSorter(true);
     }
 
-    private ImageIcon getCoverImage() {
-        // Implement this if you want to get the cover image from a different source
-        // You can return the currently selected cover image from your code
-        return null;
+    private void addFormField(JPanel panel, String label, Component field) {
+        panel.add(new JLabel(label));
+        panel.add(field);
     }
 
     private void clearFields() {
         titleField.setText("");
         authorField.setText("");
-        numOfPagesField.setText("");
+        pagesField.setText("");
         genreComboBox.setSelectedIndex(0);
         synopsisField.setText("");
-        submitButton.setEnabled(false);
-        editButton.setEnabled(false);
-        deleteButton.setEnabled(false);
+        submitButton.setEnabled(true);
     }
 
     public static void main(String[] args) {
